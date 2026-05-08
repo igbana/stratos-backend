@@ -42,6 +42,8 @@ def upload_video(file_bytes: bytes, folder: str = "stratos/videos") -> dict:
     if result.get("eager"):
         thumbnail_url = result["eager"][0]["secure_url"]
 
+    print(result["secure_url"])
+
     return {
         "url": result["secure_url"],
         "public_id": result["public_id"],
