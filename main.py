@@ -1,5 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from routes import auth, feed, videos, players, payments
 
 app = FastAPI(title="Stratos API", version="1.0.0")

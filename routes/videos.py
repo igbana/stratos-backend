@@ -1,12 +1,12 @@
-from fastapi import APIRouter, Depends, UploadFile, File, Form
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 from models.database import get_db, Video, Like, Save, User
 from routes.auth import get_user
-import uuid, os, shutil
+from utils.cloudinary_helper import upload_video as upload_video_to_cloudinary
+import uuid
 
 router = APIRouter()
-UPLOAD_DIR = "uploads/videos"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 @router.get("/trending")
 def trending(db: Session = Depends(get_db), user: User = Depends(get_user)):
@@ -51,11 +51,20 @@ def save_video(video_id: str, db: Session = Depends(get_db),
 async def upload_video(caption: str = Form(...), video: UploadFile = File(...),
                        db: Session = Depends(get_db),
                        user: User = Depends(get_user)):
-    filename = f"{uuid.uuid4()}_{video.filename}"
-    path = os.path.join(UPLOAD_DIR, filename)
-    with open(path, "wb") as f:
-        shutil.copyfileobj(video.file, f)
+    try:
+        upload = await run_in_threadpool(
+            upload_video_to_cloudinary,
+            video.file,
+            filename=video.filename,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Video upload failed: {exc}")
+    finally:
+        await video.close()
+
     vid = Video(id=str(uuid.uuid4()), user_id=user.id,
-                caption=caption, video_url=f"/uploads/videos/{filename}")
+                caption=caption, video_url=upload["url"],
+                thumbnail_url=upload["thumbnail_url"],
+                duration=upload["duration"])
     db.add(vid); db.commit(); db.refresh(vid)
     return {"video": vid.to_dict(user.id)}

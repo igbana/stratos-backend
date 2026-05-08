@@ -1,6 +1,10 @@
 import cloudinary
 import cloudinary.uploader
+from dotenv import load_dotenv
+from typing import BinaryIO
 import os
+
+load_dotenv()
 
 cloudinary.config(
     cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
@@ -25,10 +29,12 @@ def upload_image(file_bytes: bytes, folder: str = "stratos/avatars") -> dict:
         "public_id": result["public_id"],
     }
 
-def upload_video(file_bytes: bytes, folder: str = "stratos/videos") -> dict:
+def upload_video(file: bytes | BinaryIO, folder: str = "stratos/videos",
+                 filename: str | None = None) -> dict:
     """Upload a video and return secure URL, thumbnail URL, duration."""
     result = cloudinary.uploader.upload(
-        file_bytes,
+        file,
+        filename=filename,
         folder=folder,
         resource_type="video",
         eager=[
@@ -41,8 +47,6 @@ def upload_video(file_bytes: bytes, folder: str = "stratos/videos") -> dict:
     thumbnail_url = None
     if result.get("eager"):
         thumbnail_url = result["eager"][0]["secure_url"]
-
-    print(result["secure_url"])
 
     return {
         "url": result["secure_url"],
