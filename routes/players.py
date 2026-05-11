@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from models.database import get_db, User, Follow, Video
 from routes.auth import get_user
+from utils.ranking import record_video_event
 import uuid
 
 router = APIRouter()
@@ -31,6 +32,11 @@ def get_player(user_id: str, db: Session = Depends(get_db),
                user: User = Depends(get_user)):
     player = db.query(User).filter(User.id == user_id).first()
     if not player: return {"detail": "Not found"}, 404
+    latest_video = db.query(Video).filter(Video.user_id == user_id)\
+        .order_by(Video.created_at.desc()).first()
+    if latest_video:
+        record_video_event(db, latest_video.id, "profile_click", user.id)
+        db.commit()
     data = _player_dict(player, user.id, db)
     data["videos"] = [v.to_dict(user.id) for v in player.videos]
     return {"player": data}
@@ -46,6 +52,10 @@ def follow(user_id: str, db: Session = Depends(get_db),
         return {"following": False}
     db.add(Follow(id=str(uuid.uuid4()),
                   follower_id=user.id, following_id=user_id))
+    latest_video = db.query(Video).filter(Video.user_id == user_id)\
+        .order_by(Video.created_at.desc()).first()
+    if latest_video:
+        record_video_event(db, latest_video.id, "follow", user.id)
     db.commit()
     return {"following": True}
 

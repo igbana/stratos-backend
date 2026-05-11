@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from models.database import get_db, User, Payment
+from models.database import get_db, User, Payment, Video
 from routes.auth import get_user
+from utils.ranking import record_video_event
 import uuid
 
 router = APIRouter()
@@ -26,6 +27,10 @@ def fund_player(body: FundIn, db: Session = Depends(get_db),
     payment = Payment(id=str(uuid.uuid4()), payer_id=user.id,
                       recipient_id=body.recipient_id, amount=body.amount)
     recipient.earned += body.amount
+    latest_video = db.query(Video).filter(Video.user_id == body.recipient_id)\
+        .order_by(Video.created_at.desc()).first()
+    if latest_video:
+        record_video_event(db, latest_video.id, "fund", user.id, body.amount)
     db.add(payment); db.commit()
     return {"success": True, "transaction_id": payment.id}
 

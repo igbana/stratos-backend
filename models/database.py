@@ -79,6 +79,7 @@ class Video(Base):
     user = relationship("User", back_populates="videos")
     likes = relationship("Like", back_populates="video")
     saves = relationship("Save", back_populates="video")
+    events = relationship("VideoEvent", back_populates="video")
 
     def to_dict(self, current_user_id=None):
         return {
@@ -115,6 +116,17 @@ class Save(Base):
     user_id = Column(String, ForeignKey("users.id"))
     video_id = Column(String, ForeignKey("videos.id"))
     video = relationship("Video", back_populates="saves")
+
+class VideoEvent(Base):
+    __tablename__ = "video_events"
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=True)
+    video_id = Column(String, ForeignKey("videos.id"), nullable=False)
+    event_type = Column(String, nullable=False)
+    value = Column(Float, default=1.0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    video = relationship("Video", back_populates="events")
 
 class Payment(Base):
     __tablename__ = "payments"
