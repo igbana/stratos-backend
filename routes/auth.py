@@ -9,7 +9,6 @@ from models.database import get_db, User
 from sqlalchemy.orm import Session
 import os
 import re
-import uuid
 
 router = APIRouter()
 pwd_ctx = CryptContext(schemes=["bcrypt"])
@@ -21,21 +20,15 @@ PRIVY_VERIFICATION_KEY = os.getenv("PRIVY_VERIFICATION_KEY", "")
 PRIVY_ISSUER = "privy.io"
 PRIVY_ALGO = "ES256"
 
-class RegisterIn(BaseModel):
-    full_name: str
-    email: EmailStr
-    password: str
-
-class LoginIn(BaseModel):
-    email: EmailStr
-    password: str
-
 class PrivyAuthIn(BaseModel):
     access_token: str
     create_user: bool = False
+    password: str | None = None
     full_name: str | None = None
     email: EmailStr | None = None
     avatar_url: str | None = None
+    country: str | None = None
+    age_group: str | None = None
     role: str | None = None
 
 class ProfileIn(BaseModel):
@@ -132,8 +125,26 @@ def _privy_profile(claims: dict, body: PrivyAuthIn | None = None) -> dict:
             if body and body.avatar_url
             else _claim_value(claims, "picture", "avatar_url")
         ),
+        "country": (
+            body.country
+            if body and body.country
+            else _claim_value(claims, "country", "locale")
+        ),
+        "age_group": (
+            body.age_group
+            if body and body.age_group
+            else _claim_value(claims, "age_group")
+        ),
         "role": body.role if body and body.role else None,
     }
+
+def _check_password(user: User, password: str | None):
+    if password is None:
+        return
+    if not user.hashed_password:
+        raise HTTPException(401, "Password is not set for this account")
+    if not pwd_ctx.verify(password, user.hashed_password[:72]):
+        raise HTTPException(401, "Invalid password")
 
 def _upsert_privy_user(claims: dict, db: Session, body: PrivyAuthIn | None = None) -> User:
     privy_user_id = claims.get("sub")
@@ -147,6 +158,12 @@ def _upsert_privy_user(claims: dict, db: Session, body: PrivyAuthIn | None = Non
         email = profile["email"] or _fallback_email(privy_user_id)
         existing_email_user = db.query(User).filter(User.email == email).first()
         if existing_email_user:
+            if body and body.password and not existing_email_user.hashed_password and body.create_user:
+                existing_email_user.hashed_password = pwd_ctx.hash(body.password)[:72]
+                db.commit()
+                db.refresh(existing_email_user)
+            elif body:
+                _check_password(existing_email_user, body.password)
             return existing_email_user
 
         if not body or not body.create_user:
@@ -156,13 +173,19 @@ def _upsert_privy_user(claims: dict, db: Session, body: PrivyAuthIn | None = Non
             id=privy_user_id,
             full_name=(profile["full_name"] or "Privy User"),
             email=email,
-            hashed_password="",
+            hashed_password=pwd_ctx.hash(body.password)[:72] if body.password else "",
             role=(profile["role"] or "player"),
             avatar_url=profile["avatar_url"],
+            country=profile["country"],
+            age_group=profile["age_group"],
         )
         db.add(user)
     elif body:
-        for field in ("full_name", "email", "avatar_url", "role"):
+        if body.password and not user.hashed_password and body.create_user:
+            user.hashed_password = pwd_ctx.hash(body.password)[:72]
+        else:
+            _check_password(user, body.password)
+        for field in ("full_name", "email", "avatar_url", "country", "age_group", "role"):
             value = profile[field]
             if value is not None:
                 setattr(user, field, value)
@@ -189,32 +212,17 @@ def auth_config():
     return {
         "provider": "privy",
         "app_id": PRIVY_APP_ID,
-        "login_methods": ["google", "apple"],
+        "login_methods": ["email", "google", "apple"],
         "token_type": "Bearer",
     }
 
 @router.post("/register", status_code=201)
-def register(body: RegisterIn, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.email == body.email).first():
-        raise HTTPException(400, "Email already registered")
-    try:
-        user = User(
-            id=str(uuid.uuid4()),
-            full_name=body.full_name,
-            email=body.email,
-            hashed_password=pwd_ctx.hash(body.password)[:72],
-        )
-        db.add(user); db.commit(); db.refresh(user)
-        return {"access_token": make_token(user.id), "user": user.to_dict()}
-    except Exception as e:
-        raise HTTPException(500, f"Registration failed: {e}")
+def register():
+    raise HTTPException(410, "Email signup is handled by Privy")
 
 @router.post("/login")
-def login(body: LoginIn, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == body.email).first()
-    if not user or not user.hashed_password or not pwd_ctx.verify(body.password, user.hashed_password[:72]):
-        raise HTTPException(401, "Invalid credentials")
-    return {"access_token": make_token(user.id), "user": user.to_dict()}
+def login():
+    raise HTTPException(410, "Email login is handled by Privy")
 
 @router.post("/privy")
 def privy_login(body: PrivyAuthIn, db: Session = Depends(get_db)):
