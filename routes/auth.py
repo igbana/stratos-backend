@@ -5,7 +5,7 @@ from passlib.context import CryptContext
 from jose import jwt, JWTError
 from jose.exceptions import JWKError
 from datetime import datetime, timedelta
-from models.database import get_db, User
+from models.database import get_db, Follow, Like, Payment, Save, User, Video, VideoEvent
 from sqlalchemy.orm import Session
 import os
 import re
@@ -241,3 +241,40 @@ def update_profile(body: ProfileIn, user: User = Depends(get_user),
 @router.get("/me")
 def me(user: User = Depends(get_user)):
     return {"user": user.to_dict()}
+
+@router.delete("/me")
+def delete_me(user: User = Depends(get_user), db: Session = Depends(get_db)):
+    video_ids = [
+        video_id
+        for (video_id,) in db.query(Video.id).filter(Video.user_id == user.id).all()
+    ]
+
+    db.query(VideoEvent).filter(VideoEvent.user_id == user.id).delete(
+        synchronize_session=False
+    )
+    db.query(Like).filter(Like.user_id == user.id).delete(synchronize_session=False)
+    db.query(Save).filter(Save.user_id == user.id).delete(synchronize_session=False)
+    db.query(Follow).filter(
+        (Follow.follower_id == user.id) | (Follow.following_id == user.id)
+    ).delete(synchronize_session=False)
+    db.query(Payment).filter(
+        (Payment.payer_id == user.id) | (Payment.recipient_id == user.id)
+    ).delete(synchronize_session=False)
+
+    if video_ids:
+        db.query(VideoEvent).filter(VideoEvent.video_id.in_(video_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(Like).filter(Like.video_id.in_(video_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(Save).filter(Save.video_id.in_(video_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(Video).filter(Video.id.in_(video_ids)).delete(
+            synchronize_session=False
+        )
+
+    db.delete(user)
+    db.commit()
+    return {"deleted": True}
