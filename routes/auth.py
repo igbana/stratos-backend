@@ -3,6 +3,7 @@ from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, EmailStr
 from passlib.context import CryptContext
 from jose import jwt, JWTError
+from jose.exceptions import JWKError
 from datetime import datetime, timedelta
 from models.database import get_db, User
 from sqlalchemy.orm import Session
@@ -55,7 +56,10 @@ def _require_privy_config():
         raise HTTPException(500, "Privy auth is not configured")
 
 def _normalize_pem_key(value: str) -> str:
-    key = value.strip().strip('"').strip("'").replace("\\n", "\n")
+    key = value.strip().strip('"').strip("'")
+    while "\\n" in key or "\\r" in key:
+        key = key.replace("\\r", "\r").replace("\\n", "\n")
+    key = key.replace("\r\n", "\n").replace("\r", "\n").strip()
     if not key:
         return key
 
@@ -64,6 +68,11 @@ def _normalize_pem_key(value: str) -> str:
     if begin in key and end in key:
         body = key.replace(begin, "").replace(end, "")
         body = "".join(body.split())
+        chunks = [body[i:i + 64] for i in range(0, len(body), 64)]
+        return "\n".join([begin, *chunks, end])
+
+    body = "".join(key.split())
+    if re.fullmatch(r"[A-Za-z0-9+/=]+", body or "") and len(body) > 100:
         chunks = [body[i:i + 64] for i in range(0, len(body), 64)]
         return "\n".join([begin, *chunks, end])
 
@@ -86,6 +95,11 @@ def verify_privy_token(token: str) -> dict:
             algorithms=[PRIVY_ALGO],
             audience=PRIVY_APP_ID,
             issuer=PRIVY_ISSUER,
+        )
+    except JWKError:
+        raise HTTPException(
+            500,
+            "Privy verification key is malformed. Use the Privy app verification key PEM, not the client ID or app secret.",
         )
     except JWTError:
         raise HTTPException(401, "Invalid Privy token")
