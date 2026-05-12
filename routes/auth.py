@@ -16,7 +16,7 @@ oauth2 = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 SECRET = os.getenv("JWT_SECRET", "stratos-super-secret-change-in-prod")
 ALGO = "HS256"
 PRIVY_APP_ID = os.getenv("PRIVY_APP_ID")
-PRIVY_VERIFICATION_KEY = os.getenv("PRIVY_VERIFICATION_KEY", "").replace("\\n", "\n")
+PRIVY_VERIFICATION_KEY = os.getenv("PRIVY_VERIFICATION_KEY", "")
 PRIVY_ISSUER = "privy.io"
 PRIVY_ALGO = "ES256"
 
@@ -54,6 +54,21 @@ def _require_privy_config():
     if not PRIVY_APP_ID or not PRIVY_VERIFICATION_KEY:
         raise HTTPException(500, "Privy auth is not configured")
 
+def _normalize_pem_key(value: str) -> str:
+    key = value.strip().strip('"').strip("'").replace("\\n", "\n")
+    if not key:
+        return key
+
+    begin = "-----BEGIN PUBLIC KEY-----"
+    end = "-----END PUBLIC KEY-----"
+    if begin in key and end in key:
+        body = key.replace(begin, "").replace(end, "")
+        body = "".join(body.split())
+        chunks = [body[i:i + 64] for i in range(0, len(body), 64)]
+        return "\n".join([begin, *chunks, end])
+
+    return key
+
 def make_token(user_id: str) -> str:
     return jwt.encode(
         {"sub": user_id, "exp": datetime.utcnow() + timedelta(days=30)},
@@ -67,7 +82,7 @@ def verify_privy_token(token: str) -> dict:
     try:
         return jwt.decode(
             token,
-            PRIVY_VERIFICATION_KEY,
+            _normalize_pem_key(PRIVY_VERIFICATION_KEY),
             algorithms=[PRIVY_ALGO],
             audience=PRIVY_APP_ID,
             issuer=PRIVY_ISSUER,
